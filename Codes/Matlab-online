@@ -1,0 +1,35 @@
+% Clear any existing mobile device object clear mobiledev;
+clear m;
+
+
+% Initialize mobile device object m = mobiledev;
+
+% Enable logging of location data m.Logging = 1;
+
+% Define the file path
+filePath = '/MATLAB Drive/GPSData.mat';
+
+
+% Delete the existing file if it exists if exist(filePath, 'file') == 2
+delete(filePath); end
+
+% Loop to continuously log GPS data while true
+% Get the current GPS data latitude = m.Latitude; longitude = m.Longitude;
+
+% Check if the data is valid
+if ~isempty(latitude) && ~isempty(longitude) && ~any(isnan(latitude)) &&
+~any(isnan(longitude))
+% Save the last valid latitude and longitude
+Lat=
+latitude(end); lon = longitude(end);
+
+% Display the GPS data
+fprintf('Latitude: %.6f, Longitude: %.6f\n', lat, lon);
+
+
+% Save to MATLAB Drive save(filePath, 'lat', 'lon');
+else
+fprintf('Waiting for valid GPS data...\n'); end
+
+% Pause for a short while before the next reading pause(2);
+    end
