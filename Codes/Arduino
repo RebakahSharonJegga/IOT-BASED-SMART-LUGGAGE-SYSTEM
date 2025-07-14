@@ -1,0 +1,221 @@
+#include <TinyGPSPlus.h>
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include "HX711.h"
+
+// Bluetooth setup
+SoftwareSerial BTSerial(2, 3); // RX, TX
+
+// Motor Driver Pins
+const int motorPin1 = 9; // Left motor forward
+const int motorPin2 = 8; // Left motor backward
+const int motorPin3 = 7; // Right motor forward
+const int motorPin4 = 6; // Right motor backward
+
+// Ultrasonic Sensor Pins
+const int trigPin = 12;
+const int echoPin = 11;
+
+// Load Cell Pins
+const int LOADCELL_DOUT_PIN = 4;
+const int LOADCELL_SCK_PIN = 5;
+
+// Initialize the HX711
+HX711 scale;
+
+// TinyGPS++ object
+TinyGPSPlus gps;
+
+// Target GPS coordinates
+float targetLat = 0.0;
+float targetLon = 0.0;
+
+// Flag to indicate if GPS coordinates are received
+bool gpsReceived = false;
+
+// Timer to check for stale coordinates
+unsigned long lastCoordTime = 0;
+const unsigned long COORD_TIMEOUT = 10000; // 10 seconds
+
+void setup() {
+  // Serial communication setup for debugging
+  Serial.begin(9600);
+  BTSerial.begin(9600);
+
+  // Motor Driver Pins as Outputs
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorPin3, OUTPUT);
+  pinMode(motorPin4, OUTPUT);
+
+  // Ensure motors are stopped at startup
+  stopMotors();
+
+  // Ultrasonic Sensor Pins
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Initialize load cell
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+
+  Serial.println("System Initialized. Waiting for data...");
+}
+
+void loop() {
+  // Bluetooth data handling
+  if (BTSerial.available()) {
+    String data = BTSerial.readStringUntil('\n');
+    Serial.print("Received via Bluetooth: ");
+    Serial.println(data); // Print received data for debugging
+
+    // Check if the received data starts with "MOVE"
+    if (data.startsWith("MOVE")) {
+      // Extract the latitude and longitude
+      int firstCommaIndex = data.indexOf(',');
+      int secondCommaIndex = data.indexOf(',', firstCommaIndex + 1);
+      if (firstCommaIndex > 0 && secondCommaIndex > 0) {
+        String latString = data.substring(firstCommaIndex + 1, secondCommaIndex);
+        String lonString = data.substring(secondCommaIndex + 1);
+
+        // Convert to float
+        targetLat = latString.toFloat();
+        targetLon = lonString.toFloat();
+
+        // Print for debugging
+        Serial.print("Target Latitude: ");
+        Serial.println(targetLat, 6); // Print with 6 decimal places for accuracy
+        Serial.print("Target Longitude: ");
+        Serial.println(targetLon, 6); // Print with 6 decimal places for accuracy
+
+        // Set flag to indicate GPS coordinates received
+        gpsReceived = true;
+        lastCoordTime = millis(); // Reset the timer
+      }
+    }
+  }
+
+  // If GPS coordinates have not been received or are stale, stop motors
+  if (!gpsReceived || millis() - lastCoordTime > COORD_TIMEOUT) {
+    stopMotors();
+    if (gpsReceived) {
+      Serial.println("GPS coordinates stale, stopping motors.");
+      gpsReceived = false; // Reset the flag
+    }
+    return; // Skip the rest of the loop if no valid coordinates
+  }
+
+  // Get distance from ultrasonic sensor
+  long distance = getDistance();
+
+  // Obstacle detection
+  if (distance <= 20) {
+    stopMotors();
+    delay(100);
+    moveBackward();
+    delay(500);
+    stopMotors();
+    delay(100);
+    turnLeft();
+    delay(500);
+    stopMotors();
+  } else {
+    // Calculate direction and move towards target
+    moveToTarget();
+  }
+
+  // Get weight from load cell
+  float weight = scale.get_units(5); // Get the average of 5 readings
+  Serial.print("Weight: ");
+  Serial.print(weight);
+  Serial.println(" kg");
+
+  delay(100); // Short delay to avoid excessive serial output
+}
+
+long getDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH);
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
+
+void moveToTarget() {
+  
+  // Use TinyGPS++ to calculate distance and course to target
+  float distanceToTarget = TinyGPSPlus::distanceBetween(
+    gps.location.lat(),
+    gps.location.lng(),
+    targetLat,
+    targetLon
+  );
+
+  float courseToTarget = TinyGPSPlus::courseTo(
+    gps.location.lat(),
+    gps.location.lng(),
+    targetLat,
+    targetLon
+  );
+  Serial.print("Distance to Target: ");
+  Serial.println(distanceToTarget);
+  Serial.print("Course to Target: ");
+  Serial.println(courseToTarget);
+
+  // Move towards target based on calculated course
+ // Move towards target based on calculated course
+  if (distanceToTarget > 5.0) { // Threshold distance to avoid oscillations
+    if (courseToTarget >= 0 && courseToTarget < 180) {
+      turnRight();
+    } else {
+      turnLeft();
+    }
+    moveForward();
+  } else {
+    stopMotors();
+    Serial.println("Reached Target Coordinates.");
+    gpsReceived = false; // Reset the flag once target is reached
+  }
+}
+void moveForward() {
+  Serial.println("Moving Forward");
+  analogWrite(motorPin1, 120); // Adjust speed as needed
+  digitalWrite(motorPin2, 0);  // Left motor backward (off)
+  analogWrite(motorPin3, 10); // Adjust speed as needed
+  digitalWrite(motorPin4, 0);  // Right motor backward (off)
+}
+
+void moveBackward() {
+  Serial.println("Moving Backward");
+  digitalWrite(motorPin1, 0);
+  analogWrite(motorPin2, 120); // Adjust speed as needed
+  digitalWrite(motorPin3, 0);
+  analogWrite(motorPin4, 10); // Adjust speed as needed
+}
+
+void turnRight() {
+  Serial.println("Turning Right");
+  digitalWrite(motorPin1, 120);
+  digitalWrite(motorPin2, 0);
+  digitalWrite(motorPin3, 0);
+  digitalWrite(motorPin4, 10);
+}
+
+void turnLeft() {
+  Serial.println("Turning Left");
+  digitalWrite(motorPin1, 0);
+  digitalWrite(motorPin2, 120);
+  digitalWrite(motorPin3, 10);
+  digitalWrite(motorPin4, 0);
+}
+
+void stopMotors() {
+  Serial.println("Stopping Motors");
+  digitalWrite(motorPin1, 0);
+  digitalWrite(motorPin2, 0);
+  digitalWrite(motorPin3, -100);
+  digitalWrite(motorPin4, -100);
+}
+
