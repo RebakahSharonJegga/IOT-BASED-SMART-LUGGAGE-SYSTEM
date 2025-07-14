@@ -1,0 +1,29 @@
+% Clear existing Bluetooth object clear bt;
+
+% Create Bluetooth object (replace 'HC-05' with your Bluetooth module's name) bt = bluetooth('HC-05', 1);
+
+while true
+% Check if the GPS data file exists if exist('GPSData.mat', 'file')
+try
+% Load the GPS data load('GPSData.mat', 'lat', 'lon');
+catch ME
+
+
+fprintf('Error: Unable to load GPSData.mat. %s\n', ME.message); pause(2);
+continue; end
+
+% Create the command string
+command = sprintf('MOVE,%.6f,%.6f\n', lat, lon);
+
+
+% Send the command to the microcontroller write(bt, command, "string");
+
+% Display the command for debugging fprintf('Sent: %s\n', command);
+else
+% Display a message if the file does not exist fprintf('Error: GPSData.mat file not found.\n');
+end
+
+
+% Pause for a short while before the next reading pause(2);
+end
+
